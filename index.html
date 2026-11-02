@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <!-- 確保在行動裝置與桌面端均能獲得良好的自適應視圖 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鐵雨防線 - Iron Rain: Realistic Tower Defense</title>
+    <!-- 載入 Tailwind CSS 用於整體界面排版與層次佈局 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Font Awesome 提供防禦塔與軍事介面圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* 引入軍事與現代硬派字體樣式 */
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Cinzel:wght@700&display=swap');
+
+        /* 全域重設與背景設定，防止滾動並營造沉浸式黑夜氛圍 */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #08090a;
+            color: #d1d5db;
+            font-family: 'Share Tech Mono', monospace, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 遊戲畫布自適應容器 */
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0b0d10;
+        }
+
+        /* 主遊戲畫布 */
+        canvas {
+            display: block;
+            box-shadow: 0 0 45px rgba(0, 0, 0, 0.95), inset 0 0 30px rgba(0, 0, 0, 0.8);
+            cursor: crosshair;
+        }
+
+        /* 寫實金屬與軍事風格按鈕質感 */
+        .military-btn {
+            background: linear-gradient(180deg, #2b3036 0%, #16181b 100%);
+            border: 1px solid #4a515a;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15), 0 3px 6px rgba(0,0,0,0.6);
+            transition: all 0.15s ease-in-out;
+        }
+
+        .military-btn:hover:not(:disabled) {
+            background: linear-gradient(180deg, #373e46 0%, #202428 100%);
+            border-color: #7b8592;
+            transform: translateY(-1px);
+            box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.25), 0 4px 10px rgba(0,0,0,0.8);
+        }
+
+        .military-btn.selected {
+            border-color: #eab308;
+            box-shadow: 0 0 12px rgba(234, 179, 8, 0.4), inset 0 0 8px rgba(234, 179, 8, 0.2);
+            background: linear-gradient(180deg, #383a2d 0%, #1c1d15 100%);
+        }
+
+        .military-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            border-color: #26292d;
+            background: #141518;
+            box-shadow: none;
+        }
+
+        /* 昏暗雨夜微光暈效果 */
+        .vignette-overlay {
+            pointer-events: none;
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 50% 50%, transparent 45%, rgba(4, 5, 7, 0.75) 85%, rgba(2, 3, 4, 0.95) 100%);
+        }
+
+        /* 標題徽章字型 */
+        .title-font {
+            font-family: 'Cinzel', serif;
+            letter-spacing: 0.15em;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen">
+
+    <!-- 畫布與上層操作介面包裹容器 -->
+    <div id="canvas-container">
+        <!-- 核心渲染畫布：負責泥濘戰場路徑、防禦塔、敵人、砲彈、雨滴、濺射漣漪及閃電 -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- 暗角環境光疊加層，增加邊緣壓迫感與景深感 -->
+        <div class="vignette-overlay"></div>
+
+        <!-- 頂部即時儀表板 (HUD) -->
+        <div class="absolute top-4 left-6 right-6 flex flex-wrap justify-between items-center pointer-events-none z-10">
+            <!-- 戰況資訊面板 -->
+            <div class="flex items-center gap-6 bg-neutral-900/85 backdrop-blur-md px-6 py-3 rounded-lg border border-neutral-700/80 shadow-2xl pointer-events-auto">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-neutral-400 font-bold uppercase tracking-wider">作戰代號:</span>
+                    <span class="title-font text-amber-500 font-black tracking-widest text-base">IRON RAIN</span>
+                </div>
+                <!-- 資源：黃金 / 軍費 -->
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-coins text-amber-400 drop-shadow"></i>
+                    <span id="goldDisplay" class="text-xl font-bold text-amber-300">350</span>
+                </div>
+                <!-- 防線耐久度 / 生命值 -->
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved text-rose-500 drop-shadow"></i>
+                    <span id="livesDisplay" class="text-xl font-bold text-rose-300">20</span>
+                </div>
+                <!-- 當前進攻波次 -->
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-skull-crossbones text-cyan-400 drop-shadow"></i>
+                    <span class="text-neutral-400 text-sm">波次:</span>
+                    <span id="waveDisplay" class="text-xl font-bold text-cyan-300">1</span>
+                </div>
+            </div>
+
+            <!-- 控制面板：加速、音效切換與下一波次按鈕 -->
+            <div class="flex items-center gap-3 pointer-events-auto">
+                <button id="audioBtn" class="military-btn px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 text-neutral-300 font-semibold" title="開關作戰音效">
+                    <i class="fa-solid fa-volume-high text-amber-400"></i>
+                    <span id="audioText">音效開啟</span>
+                </button>
+                <button id="speedBtn" class="military-btn px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 text-neutral-300 font-semibold" title="調整作戰倍速">
+                    <i class="fa-solid fa-forward-step text-emerald-400"></i>
+                    <span id="speedText">1x 速度</span>
+                </button>
+                <button id="nextWaveBtn" class="military-btn bg-amber-600/30 hover:bg-amber-600/50 border-amber-500/60 px-5 py-2.5 rounded-lg text-sm text-amber-300 font-bold tracking-wide flex items-center gap-2">
+                    <i class="fa-solid fa-radiodirection"></i>
+                    <span>觸發波次</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 底部軍備建設選單 (塔型選擇面板) -->
+        <div class="absolute bottom-5 left-1/2 transform -translate-x-1/2 flex items-center gap-4 bg-neutral-900/90 backdrop-blur-md px-5 py-3 rounded-xl border border-neutral-700/80 shadow-2xl z-10">
+            <!-- 機槍哨所 (重機槍塔) -->
+            <button id="btn-tower-gatling" class="military-btn flex items-center gap-3.5 px-4 py-2 rounded-lg text-left" onclick="selectTowerType('gatling')">
+                <div class="w-10 h-10 rounded bg-neutral-800 border border-neutral-600 flex items-center justify-center text-amber-400 text-lg shadow-inner">
+                    <i class="fa-solid fa-crosshairs"></i>
+                </div>
+                <div>
+                    <div class="font-bold text-xs tracking-wider text-neutral-200">20mm 機槍哨所</div>
+                    <div class="text-[11px] text-amber-400"><i class="fa-solid fa-coins mr-1"></i>100 金幣</div>
+                </div>
+            </button>
+
+            <!-- 榴彈加農砲 (防禦重砲) -->
+            <button id="btn-tower-cannon" class="military-btn flex items-center gap-3.5 px-4 py-2 rounded-lg text-left" onclick="selectTowerType('cannon')">
+                <div class="w-10 h-10 rounded bg-neutral-800 border border-neutral-600 flex items-center justify-center text-rose-400 text-lg shadow-inner">
+                    <i class="fa-solid fa-bomb"></i>
+                </div>
+                <div>
+                    <div class="font-bold text-xs tracking-wider text-neutral-200">120mm 重裝重砲</div>
+                    <div class="text-[11px] text-amber-400"><i class="fa-solid fa-coins mr-1"></i>175 金幣</div>
+                </div>
+            </button>
+
+            <!-- 磁軌脈衝塔 (減速磁暴) -->
+            <button id="btn-tower-tesla" class="military-btn flex items-center gap-3.5 px-4 py-2 rounded-lg text-left" onclick="selectTowerType('tesla')">
+                <div class="w-10 h-10 rounded bg-neutral-800 border border-neutral-600 flex items-center justify-center text-cyan-400 text-lg shadow-inner">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <div>
+                    <div class="font-bold text-xs tracking-wider text-neutral-200">EMP 磁暴共振塔</div>
+                    <div class="text-[11px] text-amber-400"><i class="fa-solid fa-coins mr-1"></i>220 金幣</div>
+                </div>
+            </button>
+            
+            <!-- 取消佈署按鈕 -->
+            <button id="btn-cancel" class="military-btn px-3 py-2 rounded-lg text-xs text-neutral-400 hover:text-white" onclick="selectTowerType(null)" title="取消選取">
+                <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
+        </div>
+
+        <!-- 遊戲結束/結算覆蓋視窗 -->
+        <div id="gameOverModal" class="hidden absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center z-50">
+            <h2 id="modalTitle" class="title-font text-5xl font-black text-rose-600 tracking-wider mb-2">基地失守</h2>
+            <p id="modalDesc" class="text-neutral-400 text-sm max-w-md text-center mb-6">陣地已被敵軍滲透，所有火力點停止反應。</p>
+            <button id="restartBtn" class="military-btn px-8 py-3 rounded-lg text-amber-400 font-bold tracking-widest text-base hover:text-white transition shadow-lg">
+                重組防線 (重新開始)
+            </button>
+        </div>
+    </div>
+
+    <!-- 核心遊戲腳本：包含雨天粒子、音效引擎、戰場繪製與塔防運算邏輯 -->
+    <script>
+        /* ============================================================
+           1. 音訊合成引擎 (基於 Web Audio API，無需外部音檔載入)
+           ============================================================ */
+        class RealisticAudioEngine {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+                this.rainGain = null;
+                this.initialized = false;
+            }
+
+            // 初始化 AudioContext 並在使用者第一次互動後激活
+            init() {
+                if (this.initialized) return;
+                try {
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContextClass();
+                    this.setupRainAmbience();
+                    this.initialized = true;
+                } catch (e) {
+                    console.warn("Web Audio API 初始化失敗:", e);
+                }
+            }
+
+            // 建立持續不間斷的連續雨聲背景音（粉紅噪音濾波產生逼真雨幕聲）
+            setupRainAmbience() {
+                if (!this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * 2;
+                const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                
+                // 產生平滑低沉的粉紅噪音模擬傾盆大雨
+                let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+                for (let i = 0; i < bufferSize; i++) {
+                    const white = Math.random() * 2 - 1;
+                    b0 = 0.99886 * b0 + white * 0.0555179;
+                    b1 = 0.99332 * b1 + white * 0.0750759;
+                    b2 = 0.96900 * b2 + white * 0.1538520;
+                    b3 = 0.86650 * b3 + white * 0.3104856;
+                    b4 = 0.55000 * b4 + white * 0.5329522;
+                    b5 = -0.7616 * b5 - white * 0.0168980;
+                    output[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+                    output[i] *= 0.05; // 控制音量基準
+                    b6 = white * 0.115926;
+                }
+
+                const whiteNoiseSource = this.ctx.createBufferSource();
+                whiteNoiseSource.buffer = noiseBuffer;
+                whiteNoiseSource.loop = true;
+
+                // 透過低通濾波器模擬沉悶的大雨氛圍
+                const rainFilter = this.ctx.createBiquadFilter();
+                rainFilter.type = 'lowpass';
+                rainFilter.frequency.value = 1000;
+
+                this.rainGain = this.ctx.createGain();
+                this.rainGain.gain.setValueAtTime(0.22, this.ctx.currentTime);
+
+                whiteNoiseSource.connect(rainFilter);
+                rainFilter.connect(this.rainGain);
+                this.rainGain.connect(this.ctx.destination);
+                whiteNoiseSource.start(0);
+            }
+
+            // 開關整體音訊
+            toggle() {
+                this.init();
+                this.enabled = !this.enabled;
+                if (this.ctx) {
+                    if (this.enabled) {
+                        this.ctx.resume();
+                        if (this.rainGain) this.rainGain.gain.setValueAtTime(0.22, this.ctx.currentTime);
+                    } else {
+                        if (this.rainGain) this.rainGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+                    }
+                }
+                return this.enabled;
+            }
+
+            // 機槍射擊短促槍聲
+            playGatlingShot() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(320, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.06);
+
+                gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.06);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.06);
+            }
+
+            // 重砲深沉轟鳴發射聲
+            playCannonShot() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(25, this.ctx.currentTime + 0.35);
+
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.35);
+            }
+
+            // 磁暴高頻放電音效
+            playTeslaZap() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(650, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(180, this.ctx.currentTime + 0.18);
+
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.18);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.18);
+            }
+
+            // 遠方雷鳴沉悶回響
+            playThunder() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(65, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(18, this.ctx.currentTime + 1.6);
+
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.6);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 1.6);
+            }
+
+            // 砲彈爆炸轟擊音效
+            playExplosion() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(90, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.25);
+
+                gain.gain.setValueAtTime(0.28, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+        }
+
+        /* ============================================================
+           2. 遊戲參數、常量與配置表
+           ============================================================ */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const audio = new RealisticAudioEngine();
+
+        // 畫布基礎分辨率
+        const GAME_WIDTH = 1200;
+        const GAME_HEIGHT = 700;
+        canvas.width = GAME_WIDTH;
+        canvas.height = GAME_HEIGHT;
+
+        // 遊戲核心數據狀態
+        let gold = 350;
+        let lives = 20;
+        let wave = 1;
+        let gameSpeed = 1;
+        let isGameOver = false;
+        let selectedTowerType = null;
+        let enemiesToSpawn = [];
+        let spawnTimer = 0;
+        let waveActive = false;
+
+        // 滑鼠與游標即時座標
+        const mouse = { x: -1000, y: -1000, inside: false };
+
+        // 戰場行軍固定路徑點（S形蜿蜒泥濘通道）
+        const PATH_WAYPOINTS = [
+            { x: -30, y: 150 },
+            { x: 260, y: 150 },
+            { x: 260, y: 380 },
+            { x: 600, y: 380 },
+            { x: 600, y: 180 },
+            { x: 920, y: 180 },
+            { x: 920, y: 540 },
+            { x: 1240, y: 540 }
+        ];
+
+        // 預設可建造防禦塔的混凝土碉堡基座座標
+        const BUILD_SPOTS = [
+            { x: 150, y: 80, tower: null },
+            { x: 140, y: 260, tower: null },
+            { x: 380, y: 300, tower: null },
+            { x: 380, y: 460, tower: null },
+            { x: 480, y: 280, tower: null },
+            { x: 720, y: 260, tower: null },
+            { x: 720, y: 440, tower: null },
+            { x: 800, y: 100, tower: null },
+            { x: 1040, y: 340, tower: null },
+            { x: 1040, y: 620, tower: null }
+        ];
+
+        // 防禦塔屬性規格表 (寫實軍事數據定義)
+        const TOWER_SPECS = {
+            gatling: {
+                name: "20mm 機槍哨所",
+                cost: 100,
+                range: 155,
+                fireRate: 8,       // 射速高 (每秒約7-8發)
+                damage: 9,
+                barrelLength: 20,
+                color: "#6b7280"
+            },
+            cannon: {
+                name: "120mm 重裝重砲",
+                cost: 175,
+                range: 220,
+                fireRate: 1.1,     // 射速慢
+                damage: 65,
+                splashRadius: 75,
+                barrelLength: 26,
+                color: "#4b5563"
+            },
+            tesla: {
+                name: "EMP 磁暴共振塔",
+                cost: 220,
+                range: 140,
+                fireRate: 2.2,
+                damage: 22,
+                slowFactor: 0.55,  // 減速持續效果
+                slowDuration: 75,
+                barrelLength: 16,
+                color: "#374151"
+            }
+        };
+
+        /* ============================================================
+           3. 雨天物理粒子、漣漪與閃電模擬器
+           ============================================================ */
+        class WeatherSystem {
+            constructor(w, h) {
+                this.w = w;
+                this.h = h;
+                this.raindrops = [];
+                this.splashes = [];
+                this.lightning = { active: false, intensity: 0, timer: 120 };
+
+                // 產生初始雨絲集合 (300條雨絲，分多層速度呈現寫實景深)
+                for (let i = 0; i < 320; i++) {
+                    this.raindrops.push({
+                        x: Math.random() * (this.w + 200) - 100,
+                        y: Math.random() * this.h,
+                        length: Math.random() * 22 + 12,
+                        speed: Math.random() * 10 + 18,
+                        slant: -3.5, // 模擬側風微向左傾斜
+                        alpha: Math.random() * 0.4 + 0.2
+                    });
+                }
+            }
+
+            // 更新所有雨滴位置、碰撞地面產生的漣漪及閃電計時器
+            update(dt) {
+                // 雨絲墜落位移
+                for (let i = 0; i < this.raindrops.length; i++) {
+                    const r = this.raindrops[i];
+                    r.y += r.speed * dt * 60;
+                    r.x += r.slant * dt * 60;
+
+                    // 若落到地面則觸發地面水坑漣漪並重置到頂端
+                    if (r.y > this.h) {
+                        if (Math.random() < 0.28) {
+                            this.splashes.push({
+                                x: r.x,
+                                y: this.h - Math.random() * 15,
+                                radius: 1,
+                                maxRadius: Math.random() * 9 + 4,
+                                alpha: 0.5
+                            });
+                        }
+                        r.y = -20;
+                        r.x = Math.random() * (this.w + 200) - 100;
+                    }
+                }
+
+                // 更新地面泥濘雨花擴散
+                for (let i = this.splashes.length - 1; i >= 0; i--) {
+                    const s = this.splashes[i];
+                    s.radius += 0.45 * dt * 60;
+                    s.alpha -= 0.03 * dt * 60;
+                    if (s.alpha <= 0 || s.radius >= s.maxRadius) {
+                        this.splashes.splice(i, 1);
+                    }
+                }
+
+                // 隨機遠方閃電觸發邏輯
+                this.lightning.timer -= dt * 60;
+                if (this.lightning.timer <= 0) {
+                    if (Math.random() < 0.08) {
+                        this.lightning.active = true;
+                        this.lightning.intensity = Math.random() * 0.6 + 0.3;
+                        audio.playThunder();
+                    }
+                    this.lightning.timer = Math.random() * 300 + 200;
+                }
+
+                if (this.lightning.active) {
+                    this.lightning.intensity -= 0.04 * dt * 60;
+                    if (this.lightning.intensity <= 0) {
+                        this.lightning.active = false;
+                        this.lightning.intensity = 0;
+                    }
+                }
+            }
+
+            // 繪製雨絲、地面漣漪以及閃電瞬間暴光層
+            draw(ctx) {
+                // 1. 繪製雨滴線條
+                ctx.save();
+                ctx.lineWidth = 1.2;
+                for (let r of this.raindrops) {
+                    ctx.strokeStyle = `rgba(180, 205, 230, ${r.alpha})`;
+                    ctx.beginPath();
+                    ctx.moveTo(r.x, r.y);
+                    ctx.lineTo(r.x + r.slant * 1.5, r.y + r.length);
+                    ctx.stroke();
+                }
+
+                // 2. 繪製地面水花環 (橢圓水坑同心圓)
+                for (let s of this.splashes) {
+                    ctx.strokeStyle = `rgba(170, 200, 230, ${s.alpha})`;
+                    ctx.beginPath();
+                    ctx.ellipse(s.x, s.y, s.radius * 1.8, s.radius * 0.6, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                // 3. 閃電環境亮光渲染 (短暫泛白映照整個雨夜大地)
+                if (this.lightning.active && this.lightning.intensity > 0) {
+                    ctx.fillStyle = `rgba(215, 235, 255, ${this.lightning.intensity * 0.45})`;
+                    ctx.fillRect(0, 0, this.w, this.h);
+                }
+            }
+        }
+
+        const weather = new WeatherSystem(GAME_WIDTH, GAME_HEIGHT);
+
+        /* ============================================================
+           4. 敵人單位類別 (敵方步兵、裝甲車、重裝機甲)
+           ============================================================ */
+        class Enemy {
+            constructor(type, waveMultiplier = 1) {
+                this.type = type; // 'infantry', 'armored', 'mech'
+                this.waypointIndex = 0;
+                this.x = PATH_WAYPOINTS[0].x;
+                this.y = PATH_WAYPOINTS[0].y;
+                this.radius = 12;
+                this.rotation = 0;
+                this.isSlowed = false;
+                this.slowTimer = 0;
+
+                // 依據兵種配置數值
+                if (type === 'infantry') {
+                    this.maxHp = 60 * waveMultiplier;
+                    this.speed = 1.35;
+                    this.reward = 18;
+                    this.color = '#737f8d';
+                    this.radius = 9;
+                } else if (type === 'armored') {
+                    this.maxHp = 180 * waveMultiplier;
+                    this.speed = 0.95;
+                    this.reward = 35;
+                    this.color = '#4f5864';
+                    this.radius = 13;
+                } else if (type === 'mech') {
+                    this.maxHp = 520 * waveMultiplier;
+                    this.speed = 0.65;
+                    this.reward = 80;
+                    this.color = '#313742';
+                    this.radius = 17;
+                }
+                this.hp = this.maxHp;
+            }
+
+            // 更新行軍邏輯
+            update(dt) {
+                // 處理緩速減益狀態
+                if (this.slowTimer > 0) {
+                    this.slowTimer -= dt * 60;
+                    if (this.slowTimer <= 0) this.isSlowed = false;
+                }
+
+                const currentSpeed = this.isSlowed ? this.speed * 0.5 : this.speed;
+                const target = PATH_WAYPOINTS[this.waypointIndex + 1];
+
+                if (!target) return true; // 已突破防線
+
+                const dx = target.x - this.x;
+                const dy = target.y - this.y;
+                const dist = Math.hypot(dx, dy);
+                this.rotation = Math.atan2(dy, dx);
+
+                const step = currentSpeed * 60 * dt;
+                if (dist <= step) {
+                    this.x = target.x;
+                    this.y = target.y;
+                    this.waypointIndex++;
+                    if (this.waypointIndex >= PATH_WAYPOINTS.length - 1) {
+                        return true; // 抵達終點
+                    }
+                } else {
+                    this.x += (dx / dist) * step;
+                    this.y += (dy / dist) * step;
+                }
+                return false;
+            }
+
+            // 繪製寫實軍事迷彩載具外型與血條
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+
+                // 陰影投射
+                ctx.shadowColor = 'rgba(0,0,0,0.6)';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 3;
+                ctx.shadowOffsetY = 4;
+
+                // 依據不同類型繪製造型
+                if (this.type === 'infantry') {
+                    // 偵察兵小隊造型
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#2b3038';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // 步槍槍管指向
+                    ctx.strokeStyle = '#1b1d22';
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(this.radius + 4, 0);
+                    ctx.stroke();
+                } else if (this.type === 'armored') {
+                    // 輕裝甲運兵車 (履帶與車身)
+                    ctx.fillStyle = '#1c1f24';
+                    ctx.fillRect(-this.radius - 2, -this.radius + 1, (this.radius + 2) * 2, 4);
+                    ctx.fillRect(-this.radius - 2, this.radius - 5, (this.radius + 2) * 2, 4);
+
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(-this.radius, -this.radius + 4, this.radius * 2, (this.radius - 4) * 2);
+
+                    // 砲塔
+                    ctx.fillStyle = '#2d333b';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#111';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(this.radius + 3, 0);
+                    ctx.stroke();
+                } else {
+                    // 重裝雙足攻城機甲
+                    ctx.fillStyle = '#171a1f';
+                    ctx.fillRect(-this.radius, -this.radius - 2, 10, 6);
+                    ctx.fillRect(-this.radius, this.radius - 4, 10, 6);
+
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.rect(-this.radius + 3, -this.radius + 2, this.radius * 2 - 4, (this.radius - 2) * 2);
+                    ctx.fill();
+
+                    // 機甲核心指示燈 (暗紅色微光)
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.arc(3, 0, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 若處於 EMP 減速狀態，繪製電弧微粒包覆感
+                if (this.isSlowed) {
+                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.radius + 3, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+
+                // 繪製敵人上方寫實血量條
+                const hpPercent = Math.max(0, this.hp / this.maxHp);
+                const barWidth = 24;
+                const barHeight = 3.5;
+                const barX = this.x - barWidth / 2;
+                const barY = this.y - this.radius - 8;
+
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2);
+
+                // 隨血量高低由綠變黃再變紅
+                let healthColor = '#22c55e';
+                if (hpPercent < 0.6) healthColor = '#eab308';
+                if (hpPercent < 0.25) healthColor = '#ef4444';
+
+                ctx.fillStyle = healthColor;
+                ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+            }
+        }
+
+        /* ============================================================
+           5. 防禦砲塔類別 (機槍哨所、重裝砲塔、EMP電磁塔)
+           ============================================================ */
+        class Tower {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.spec = TOWER_SPECS[type];
+                this.angle = 0;
+                this.cooldown = 0;
+                this.target = null;
+                this.muzzleFlash = 0; // 開火槍口火光倒數
+            }
+
+            // 尋找攻擊範圍內行進距離最遠的威脅目標
+            update(dt, enemies, projectiles) {
+                if (this.cooldown > 0) {
+                    this.cooldown -= dt;
+                }
+                if (this.muzzleFlash > 0) {
+                    this.muzzleFlash -= dt * 60;
+                }
+
+                // 檢驗現有目標是否依然有效且在射程內
+                if (this.target) {
+                    const dist = Math.hypot(this.target.x - this.x, this.target.y - this.y);
+                    if (this.target.hp <= 0 || dist > this.spec.range) {
+                        this.target = null;
+                    }
+                }
+
+                // 自動索敵邏輯：鎖定行軍進度最高的敵人
+                if (!this.target) {
+                    let bestProgress = -1;
+                    for (let enemy of enemies) {
+                        const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+                        if (dist <= this.spec.range) {
+                            const progress = enemy.waypointIndex * 1000 + Math.hypot(enemy.x - PATH_WAYPOINTS[enemy.waypointIndex].x, enemy.y - PATH_WAYPOINTS[enemy.waypointIndex].y);
+                            if (progress > bestProgress) {
+                                bestProgress = progress;
+                                this.target = enemy;
+                            }
+                        }
+                    }
+                }
+
+                // 若有目標則轉向並發射彈藥
+                if (this.target) {
+                    const dx = this.target.x - this.x;
+                    const dy = this.target.y - this.y;
+                    this.angle = Math.atan2(dy, dx);
+
+                    if (this.cooldown <= 0) {
+                        this.shoot(projectiles);
+                        this.cooldown = 1 / this.spec.fireRate;
+                        this.muzzleFlash = 4;
+                    }
+                }
+            }
+
+            // 開火生成對應拋射物或光束
+            shoot(projectiles) {
+                if (this.type === 'gatling') {
+                    audio.playGatlingShot();
+                    projectiles.push(new Projectile(this.x, this.y, this.target, 'bullet', this.spec.damage));
+                } else if (this.type === 'cannon') {
+                    audio.playCannonShot();
+                    projectiles.push(new Projectile(this.x, this.y, this.target, 'shell', this.spec.damage, this.spec.splashRadius));
+                } else if (this.type === 'tesla') {
+                    audio.playTeslaZap();
+                    // 磁暴塔直接對目標造成傷害並施加減速
+                    this.target.hp -= this.spec.damage;
+                    this.target.isSlowed = true;
+                    this.target.slowTimer = this.spec.slowDuration;
+                    createTeslaSparks(this.x, this.y, this.target.x, this.target.y);
+                }
+            }
+
+            // 繪製防禦塔本體、底座與槍管旋轉
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // 1. 混凝土加固基座 (六角形防禦工事)
+                ctx.fillStyle = '#26292e';
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = (i * Math.PI) / 3;
+                    const px = Math.cos(a) * 22;
+                    const py = Math.sin(a) * 22;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = '#3e444d';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+
+                // 2. 砲塔轉向本體
+                ctx.rotate(this.angle);
+
+                // 繪製槍/砲管
+                if (this.type === 'gatling') {
+                    ctx.fillStyle = '#1e2025';
+                    ctx.fillRect(0, -3.5, this.spec.barrelLength, 7);
+                    // 槍口火光
+                    if (this.muzzleFlash > 0) {
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.beginPath();
+                        ctx.arc(this.spec.barrelLength + 4, 0, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } else if (this.type === 'cannon') {
+                    ctx.fillStyle = '#1b1d22';
+                    ctx.fillRect(0, -6, this.spec.barrelLength, 12);
+                    // 砲口制退器細節
+                    ctx.fillStyle = '#30363d';
+                    ctx.fillRect(this.spec.barrelLength - 4, -7.5, 5, 15);
+                    // 開火煙火
+                    if (this.muzzleFlash > 0) {
+                        ctx.fillStyle = '#f97316';
+                        ctx.beginPath();
+                        ctx.arc(this.spec.barrelLength + 6, 0, 9, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } else if (this.type === 'tesla') {
+                    // 電磁線圈線路
+                    ctx.fillStyle = '#0ea5e9';
+                    ctx.fillRect(4, -4, 12, 8);
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.beginPath();
+                    ctx.arc(16, 0, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 砲塔座艙核心
+                ctx.fillStyle = this.spec.color;
+                ctx.beginPath();
+                ctx.arc(0, 0, 13, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#181a1d';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        /* ============================================================
+           6. 砲彈、爆炸與粒子特效系統
+           ============================================================ */
+        class Projectile {
+            constructor(x, y, target, type, damage, splashRadius = 0) {
+                this.x = x;
+                this.y = y;
+                this.target = target;
+                this.type = type;
+                this.damage = damage;
+                this.splashRadius = splashRadius;
+                this.targetPos = { x: target.x, y: target.y };
+                this.speed = (type === 'bullet') ? 600 : 380;
+                this.toRemove = false;
+            }
+
+            update(dt, enemies) {
+                // 如果目標存活則持續導向目標最新位置
+                if (this.target && this.target.hp > 0) {
+                    this.targetPos = { x: this.target.x, y: this.target.y };
+                }
+
+                const dx = this.targetPos.x - this.x;
+                const dy = this.targetPos.y - this.y;
+                const dist = Math.hypot(dx, dy);
+                const step = this.speed * dt;
+
+                if (dist <= step) {
+                    this.hit(enemies);
+                    this.toRemove = true;
+                } else {
+                    this.x += (dx / dist) * step;
+                    this.y += (dy / dist) * step;
+                }
+            }
+
+            hit(enemies) {
+                if (this.type === 'bullet') {
+                    if (this.target && this.target.hp > 0) {
+                        this.target.hp -= this.damage;
+                        createSparks(this.x, this.y, 4, '#fbbf24');
+                    }
+                } else if (this.type === 'shell') {
+                    // 重砲引爆 AOE 濺射爆炸
+                    audio.playExplosion();
+                    createExplosion(this.x, this.y, this.splashRadius);
+                    for (let enemy of enemies) {
+                        const d = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+                        if (d <= this.splashRadius) {
+                            const falloff = 1 - (d / this.splashRadius) * 0.45;
+                            enemy.hp -= this.damage * falloff;
+                        }
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                if (this.type === 'bullet') {
+                    // 曳光彈金黃色穿透軌跡
+                    ctx.fillStyle = '#fde047';
+                    ctx.shadowColor = '#eab308';
+                    ctx.shadowBlur = 6;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // 重砲砲彈
+                    ctx.fillStyle = '#f97316';
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 4.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        // 視覺爆破粒子陣列
+        const visualEffects = [];
+
+        function createSparks(x, y, count, color) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 60 + 20;
+                visualEffects.push({
+                    type: 'particle',
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 0.25,
+                    maxLife: 0.25,
+                    color: color,
+                    size: Math.random() * 2 + 1
+                });
+            }
+        }
+
+        function createExplosion(x, y, radius) {
+            // 爆炸火球
+            visualEffects.push({
+                type: 'blast',
+                x: x,
+                y: y,
+                radius: 4,
+                maxRadius: radius * 0.85,
+                life: 0.35,
+                maxLife: 0.35
+            });
+            // 飛散破片
+            createSparks(x, y, 16, '#f97316');
+            createSparks(x, y, 8, '#e2e8f0');
+        }
+
+        function createTeslaSparks(x1, y1, x2, y2) {
+            visualEffects.push({
+                type: 'lightning_beam',
+                x1: x1,
+                y1: y1,
+                x2: x2,
+                y2: y2,
+                life: 0.16,
+                maxLife: 0.16
+            });
+        }
+
+        /* ============================================================
+           7. 戰場地形與泥濘路徑寫實繪製
+           ============================================================ */
+        function drawBattleground(ctx) {
+            // 1. 底層暗沉潮濕荒原背景
+            ctx.fillStyle = '#0f1216';
+            ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            // 2. 泥濘道路外層陰影與路面
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // 路徑泥土外緣
+            ctx.beginPath();
+            ctx.moveTo(PATH_WAYPOINTS[0].x, PATH_WAYPOINTS[0].y);
+            for (let i = 1; i < PATH_WAYPOINTS.length; i++) {
+                ctx.lineTo(PATH_WAYPOINTS[i].x, PATH_WAYPOINTS[i].y);
+            }
+            ctx.lineWidth = 58;
+            ctx.strokeStyle = '#1b1d1f';
+            ctx.stroke();
+
+            // 路徑內層車轍與深色碎石
+            ctx.lineWidth = 44;
+            ctx.strokeStyle = '#25292e';
+            ctx.stroke();
+
+            // 潮濕反光與兩側泥土斑駁紋理
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = '#181a1d';
+            ctx.stroke();
+            ctx.restore();
+
+            // 3. 繪製防禦塔預留基座 (水泥碉堡地基)
+            for (let spot of BUILD_SPOTS) {
+                ctx.save();
+                ctx.fillStyle = '#1a1d22';
+                ctx.strokeStyle = '#2f353e';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(spot.x, spot.y, 25, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // 未建造標記十字鎖定符
+                if (!spot.tower) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+                    ctx.beginPath();
+                    ctx.moveTo(spot.x - 7, spot.y);
+                    ctx.lineTo(spot.x + 7, spot.y);
+                    ctx.moveTo(spot.x, spot.y - 7);
+                    ctx.lineTo(spot.x, spot.y + 7);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            // 4. 若玩家正在選取防禦塔準備放置，渲染輔助預覽射程圈
+            if (selectedTowerType && mouse.inside) {
+                const spec = TOWER_SPECS[selectedTowerType];
+                const spot = getNearestBuildSpot(mouse.x, mouse.y);
+                const placeX = spot ? spot.x : mouse.x;
+                const placeY = spot ? spot.y : mouse.y;
+
+                ctx.save();
+                ctx.fillStyle = spot && !spot.tower ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)';
+                ctx.strokeStyle = spot && !spot.tower ? '#22c55e' : '#ef4444';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 6]);
+
+                ctx.beginPath();
+                ctx.arc(placeX, placeY, spec.range, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        function getNearestBuildSpot(x, y) {
+            for (let spot of BUILD_SPOTS) {
+                if (Math.hypot(spot.x - x, spot.y - y) < 32) {
+                    return spot;
+                }
+            }
+            return null;
+        }
+
+        /* ============================================================
+           8. 波次產生與遊戲循環排程
+           ============================================================ */
+        const enemies = [];
+        const towers = [];
+        const projectiles = [];
+
+        function triggerNextWave() {
+            if (waveActive) return;
+            audio.init();
+            waveActive = true;
+            document.getElementById('nextWaveBtn').disabled = true;
+
+            enemiesToSpawn = [];
+            const multiplier = Math.pow(1.18, wave - 1);
+            const count = 7 + wave * 3;
+
+            // 根據波次混合不同比重的部隊
+            for (let i = 0; i < count; i++) {
+                if (wave >= 4 && i % 5 === 0) {
+                    enemiesToSpawn.push({ type: 'mech', multiplier: multiplier });
+                } else if (wave >= 2 && i % 2 === 0) {
+                    enemiesToSpawn.push({ type: 'armored', multiplier: multiplier });
+                } else {
+                    enemiesToSpawn.push({ type: 'infantry', multiplier: multiplier });
+                }
+            }
+            spawnTimer = 0;
+        }
+
+        function selectTowerType(type) {
+            audio.init();
+            selectedTowerType = type;
+            document.querySelectorAll('[id^="btn-tower-"]').forEach(btn => btn.classList.remove('selected'));
+            if (type) {
+                const activeBtn = document.getElementById(`btn-tower-${type}`);
+                if (activeBtn) activeBtn.classList.add('selected');
+            }
+        }
+
+        // 點擊地圖擺放防禦塔
+        canvas.addEventListener('click', (e) => {
+            audio.init();
+            if (isGameOver || !selectedTowerType) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const clickX = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const clickY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+            const spot = getNearestBuildSpot(clickX, clickY);
+            if (spot && !spot.tower) {
+                const spec = TOWER_SPECS[selectedTowerType];
+                if (gold >= spec.cost) {
+                    gold -= spec.cost;
+                    const newTower = new Tower(spot.x, spot.y, selectedTowerType);
+                    spot.tower = newTower;
+                    towers.push(newTower);
+                    updateUI();
+                }
+            }
+        });
+
+        // 滑鼠游標位置追蹤
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = (e.clientX - rect.left) * (canvas.width / rect.width);
+            mouse.y = (e.clientY - rect.top) * (canvas.height / rect.height);
+            mouse.inside = true;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            mouse.inside = false;
+        });
+
+        // 更新頂部數據面板
+        function updateUI() {
+            document.getElementById('goldDisplay').innerText = Math.floor(gold);
+            document.getElementById('livesDisplay').innerText = lives;
+            document.getElementById('waveDisplay').innerText = wave;
+
+            // 檢查購買按鈕可用狀態
+            for (let key in TOWER_SPECS) {
+                const btn = document.getElementById(`btn-tower-${key}`);
+                if (btn) btn.disabled = gold < TOWER_SPECS[key].cost;
+            }
+        }
+
+        // 遊戲結束觸發
+        function handleGameOver(won = false) {
+            isGameOver = true;
+            const modal = document.getElementById('gameOverModal');
+            const title = document.getElementById('modalTitle');
+            const desc = document.getElementById('modalDesc');
+
+            modal.classList.remove('hidden');
+            if (won) {
+                title.innerText = "作戰勝利";
+                title.className = "title-font text-5xl font-black text-emerald-500 tracking-wider mb-2";
+                desc.innerText = "成功瓦解所有敵軍攻勢，防線依舊固若金湯。";
+            } else {
+                title.innerText = "基地失守";
+                title.className = "title-font text-5xl font-black text-rose-600 tracking-wider mb-2";
+                desc.innerText = "陣地已被敵軍滲透，所有火力點停止反應。";
+            }
+        }
+
+        // 重新開始初始化
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            location.reload();
+        });
+
+        // 速度切換
+        document.getElementById('speedBtn').addEventListener('click', () => {
+            audio.init();
+            gameSpeed = gameSpeed === 1 ? 2 : 1;
+            document.getElementById('speedText').innerText = `${gameSpeed}x 速度`;
+        });
+
+        // 音訊切換
+        document.getElementById('audioBtn').addEventListener('click', () => {
+            const isMuted = !audio.toggle();
+            document.getElementById('audioText').innerText = isMuted ? '靜音中' : '音效開啟';
+        });
+
+        document.getElementById('nextWaveBtn').addEventListener('click', triggerNextWave);
+
+        /* ============================================================
+           9. 主遊戲迴圈 (Main Game Loop)
+           ============================================================ */
+        let lastTime = performance.now();
+
+        function gameLoop(now) {
+            const rawDt = (now - lastTime) / 1000;
+            lastTime = now;
+            // 避免切換分頁回來時的時間突波
+            const dt = Math.min(rawDt, 0.1) * gameSpeed;
+
+            if (!isGameOver) {
+                // 1. 處理部隊生成排程
+                if (waveActive && enemiesToSpawn.length > 0) {
+                    spawnTimer -= dt;
+                    if (spawnTimer <= 0) {
+                        const nextSpawn = enemiesToSpawn.shift();
+                        enemies.push(new Enemy(nextSpawn.type, nextSpawn.multiplier));
+                        spawnTimer = 0.85; // 生成間距秒數
+                    }
+                }
+
+                // 2. 更新敵人狀態
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const e = enemies[i];
+                    const reachedEnd = e.update(dt);
+                    if (reachedEnd) {
+                        lives--;
+                        enemies.splice(i, 1);
+                        updateUI();
+                        if (lives <= 0) {
+                            handleGameOver(false);
+                            break;
+                        }
+                    } else if (e.hp <= 0) {
+                        gold += e.reward;
+                        createSparks(e.x, e.y, 10, '#94a3b8');
+                        enemies.splice(i, 1);
+                        updateUI();
+                    }
+                }
+
+                // 3. 檢查波次結算
+                if (waveActive && enemiesToSpawn.length === 0 && enemies.length === 0) {
+                    waveActive = false;
+                    gold += 60 + wave * 15; // 通關波次獎勵金
+                    wave++;
+                    updateUI();
+                    document.getElementById('nextWaveBtn').disabled = false;
+                }
+
+                // 4. 更新砲塔
+                for (let tower of towers) {
+                    tower.update(dt, enemies, projectiles);
+                }
+
+                // 5. 更新砲彈
+                for (let i = projectiles.length - 1; i >= 0; i--) {
+                    const p = projectiles[i];
+                    p.update(dt, enemies);
+                    if (p.toRemove) projectiles.splice(i, 1);
+                }
+
+                // 6. 更新視覺特效 (粒子、爆炸波與閃電)
+                for (let i = visualEffects.length - 1; i >= 0; i--) {
+                    const fx = visualEffects[i];
+                    fx.life -= dt;
+                    if (fx.type === 'particle') {
+                        fx.x += fx.vx * dt;
+                        fx.y += fx.vy * dt;
+                    } else if (fx.type === 'blast') {
+                        fx.radius += (fx.maxRadius - fx.radius) * 12 * dt;
+                    }
+                    if (fx.life <= 0) visualEffects.splice(i, 1);
+                }
+
+                // 7. 更新動態天氣系統
+                weather.update(dt);
+            }
+
+            // --- 渲染畫面 ---
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            // 繪製寫實戰場底圖與建築位
+            drawBattleground(ctx);
+
+            // 繪製所有敵人
+            for (let enemy of enemies) enemy.draw(ctx);
+
+            // 繪製所有防禦塔
+            for (let tower of towers) tower.draw(ctx);
+
+            // 繪製砲彈與彈道
+            for (let p of projectiles) p.draw(ctx);
+
+            // 繪製特效層 (電弧、火球與破片)
+            for (let fx of visualEffects) {
+                const alpha = Math.max(0, fx.life / fx.maxLife);
+                if (fx.type === 'particle') {
+                    ctx.fillStyle = fx.color;
+                    ctx.globalAlpha = alpha;
+                    ctx.beginPath();
+                    ctx.arc(fx.x, fx.y, fx.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1.0;
+                } else if (fx.type === 'blast') {
+                    ctx.save();
+                    ctx.globalAlpha = alpha * 0.7;
+                    ctx.fillStyle = '#ea580c';
+                    ctx.beginPath();
+                    ctx.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                } else if (fx.type === 'lightning_beam') {
+                    // 電磁光弧
+                    ctx.save();
+                    ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.moveTo(fx.x1, fx.y1);
+                    // 產生折線閃電效果
+                    const midX = (fx.x1 + fx.x2) / 2 + (Math.random() - 0.5) * 20;
+                    const midY = (fx.y1 + fx.y2) / 2 + (Math.random() - 0.5) * 20;
+                    ctx.lineTo(midX, midY);
+                    ctx.lineTo(fx.x2, fx.y2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+
+            // 繪製寫實雨天氛圍層 (雨絲、水坑漣漪、遠方閃電光效)
+            weather.draw(ctx);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 頁面加載完成後啟動遊戲
+        window.onload = () => {
+            updateUI();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
